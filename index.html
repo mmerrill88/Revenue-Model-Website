@@ -1,0 +1,753 @@
+<!--
+  2nd-Tenant Revenue Model Builder
+  Runs entirely in the browser. No server, no upload of data anywhere.
+  Parses a "Community Anchors" sheet and generates a priced, tiered revenue model
+  (Rate Card + Revenue Model w/ build tiers + Summary + Cost-to-Serve) as .xlsx.
+-->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>2nd-Tenant Revenue Model Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+
+<style>
+  :root{
+    --ink:#0a1622;        /* deep navy-black canvas */
+    --panel:#0f2236;      /* console panel */
+    --panel-2:#13293f;
+    --navy:#1f4e78;       /* brand — matches the workbook headers */
+    --signal:#2bd4c0;     /* fiber-signal teal accent */
+    --signal-dim:#1c8e84;
+    --amber:#e7b24a;      /* echoes the editable yellow input cells */
+    --paper:#eef3f8;
+    --muted:#8aa2b8;
+    --line:rgba(255,255,255,.10);
+    --line-strong:rgba(255,255,255,.18);
+    --danger:#ff6b6b;
+    --ok:#2bd4c0;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1100px 500px at 78% -8%, rgba(43,212,192,.10), transparent 60%),
+      radial-gradient(900px 600px at 8% 110%, rgba(31,78,120,.30), transparent 55%),
+      var(--ink);
+    color:var(--paper);
+    font-family:"Space Grotesk", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:34px 22px 60px}
+
+  /* ---- header ---- */
+  header.top{display:flex;align-items:center;gap:12px;margin-bottom:30px}
+  .glyph{position:relative;width:30px;height:30px;flex:0 0 auto}
+  .glyph i{position:absolute;border-radius:50%}
+  .glyph .core{inset:10px;background:var(--signal);box-shadow:0 0 14px var(--signal)}
+  .glyph .ring{inset:0;border:1.5px solid var(--signal-dim);opacity:.55}
+  .brand{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);
+    font-family:"IBM Plex Mono",monospace;font-weight:500}
+  .brand b{color:var(--paper);font-weight:600}
+
+  /* ---- hero ---- */
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--signal);margin:0 0 12px}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.04;margin:0 0 14px;font-weight:600;letter-spacing:-.01em}
+  h1 .lit{color:var(--signal)}
+  .lede{font-size:17px;line-height:1.55;color:#c4d4e3;max-width:60ch;margin:0 0 26px}
+
+  /* ---- the fiber track (signature) ---- */
+  .track{display:grid;grid-template-columns:auto 1fr auto 1fr auto;align-items:center;
+    gap:10px;margin:0 0 30px;padding:16px 18px;border:1px solid var(--line);
+    border-radius:var(--r);background:linear-gradient(180deg, var(--panel), rgba(15,34,54,.5))}
+  .node{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:64px}
+  .node .dot{width:11px;height:11px;border-radius:50%;background:#21425f;border:1px solid var(--line-strong);
+    transition:all .35s ease}
+  .node.on .dot{background:var(--signal);border-color:var(--signal);box-shadow:0 0 12px var(--signal)}
+  .node small{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+    color:var(--muted);text-transform:uppercase}
+  .node.on small{color:var(--paper)}
+  .wire{position:relative;height:2px;background:var(--line-strong);border-radius:2px;overflow:hidden}
+  .wire::after{content:"";position:absolute;top:0;left:-40%;width:40%;height:100%;
+    background:linear-gradient(90deg,transparent,var(--signal),transparent);
+    animation:flow 2.6s linear infinite}
+  @keyframes flow{from{left:-40%}to{left:100%}}
+
+  /* ---- drop zone ---- */
+  .drop{position:relative;border:1.5px dashed var(--line-strong);border-radius:var(--r);
+    background:linear-gradient(180deg, rgba(19,41,63,.7), rgba(15,34,54,.45));
+    padding:40px 26px;text-align:center;cursor:pointer;transition:border-color .2s, background .2s, transform .08s}
+  .drop:hover{border-color:var(--signal-dim);background:rgba(19,41,63,.9)}
+  .drop.drag{border-color:var(--signal);background:rgba(43,212,192,.07)}
+  .drop:active{transform:translateY(1px)}
+  .drop .arrow{width:46px;height:46px;margin:0 auto 14px;border-radius:12px;
+    display:grid;place-items:center;background:rgba(43,212,192,.12);border:1px solid var(--signal-dim)}
+  .drop .arrow svg{width:22px;height:22px;stroke:var(--signal)}
+  .drop h2{margin:0 0 6px;font-size:18px;font-weight:600}
+  .drop p{margin:0;color:var(--muted);font-size:14px}
+  .drop .req{margin-top:12px;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted)}
+  .drop .req b{color:var(--amber);font-weight:500}
+  input[type=file]{display:none}
+
+  /* ---- options ---- */
+  .options{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:18px}
+  .opt{border:1px solid var(--line);border-radius:12px;padding:14px 15px;background:var(--panel)}
+  .opt label{display:block;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+  .seg{display:flex;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden}
+  .seg button{flex:1;background:transparent;color:var(--muted);border:0;padding:9px 0;
+    font-family:"IBM Plex Mono",monospace;font-size:13px;cursor:pointer;transition:all .15s}
+  .seg button.sel{background:var(--navy);color:#fff}
+  .seg button:not(.sel):hover{color:var(--paper)}
+  .rate{display:flex;align-items:baseline;gap:8px}
+  .rate input{width:74px;background:rgba(231,178,74,.10);border:1px solid rgba(231,178,74,.45);
+    color:var(--paper);border-radius:9px;padding:9px 10px;font-family:"IBM Plex Mono",monospace;
+    font-size:16px;text-align:center}
+  .rate input:focus{outline:2px solid var(--amber);outline-offset:1px}
+  .rate span{color:var(--muted);font-size:14px}
+  .toggle{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .toggle .sw{width:42px;height:24px;border-radius:13px;background:#21425f;position:relative;transition:background .2s;flex:0 0 auto}
+  .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+    background:#fff;transition:transform .2s}
+  .toggle.on .sw{background:var(--signal-dim)}
+  .toggle.on .sw::after{transform:translateX(18px)}
+  .toggle span{font-size:13px;color:#c4d4e3}
+
+  /* ---- readout ---- */
+  .readout{margin-top:22px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
+    background:var(--panel);display:none}
+  .readout.show{display:block}
+  .ro-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+  .ro-head h3{margin:0;font-size:14px;font-weight:600;letter-spacing:.02em}
+  .ro-head .file{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+    max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .telemetry{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line)}
+  .cell{background:var(--panel);padding:16px 16px}
+  .cell .k{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+  .cell .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+  .cell .v.teal{color:var(--signal)}
+  .cell .sub{font-size:11px;color:var(--muted);margin-top:3px;font-family:"IBM Plex Mono",monospace}
+  .tiers{padding:16px 18px;border-top:1px solid var(--line)}
+  .tiers .th{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+  .bar{display:flex;align-items:center;gap:12px;margin-bottom:9px}
+  .bar .name{width:200px;font-size:13px;color:#c4d4e3;flex:0 0 auto}
+  .bar .meter{flex:1;height:9px;border-radius:5px;background:#16304a;overflow:hidden}
+  .bar .meter i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--navy),var(--signal))}
+  .bar .ct{width:34px;text-align:right;font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--paper);flex:0 0 auto}
+
+  /* ---- actions ---- */
+  .actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:20px}
+  .btn{appearance:none;border:0;border-radius:11px;padding:14px 22px;font-family:"Space Grotesk",sans-serif;
+    font-size:15px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:9px;transition:transform .08s, filter .15s}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--signal);color:#05231f;box-shadow:0 6px 22px rgba(43,212,192,.28)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.primary[disabled]{background:#1c3850;color:#5e7790;box-shadow:none;cursor:not-allowed}
+  .btn.ghost{background:transparent;color:#c4d4e3;border:1px solid var(--line-strong)}
+  .btn.ghost:hover{border-color:var(--signal-dim);color:#fff}
+  .btn svg{width:18px;height:18px}
+
+  /* ---- messages ---- */
+  .msg{margin-top:16px;border-radius:11px;padding:13px 16px;font-size:14px;line-height:1.45;display:none}
+  .msg.show{display:block}
+  .msg.err{background:rgba(255,107,107,.10);border:1px solid rgba(255,107,107,.4);color:#ffd2d2}
+  .msg.warn{background:rgba(231,178,74,.10);border:1px solid rgba(231,178,74,.4);color:#f3deb2}
+
+  /* ---- footer ---- */
+  footer{margin-top:40px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;line-height:1.6}
+  footer h4{color:var(--paper);font-size:13px;margin:0 0 8px;letter-spacing:.04em;text-transform:uppercase;font-family:"IBM Plex Mono",monospace}
+  footer code{font-family:"IBM Plex Mono",monospace;color:#c4d4e3;background:rgba(255,255,255,.05);
+    padding:1px 6px;border-radius:5px;font-size:12px}
+  footer .cols{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+
+  @media (max-width:680px){
+    .options{grid-template-columns:1fr}
+    .telemetry{grid-template-columns:1fr 1fr}
+    .bar .name{width:130px;font-size:12px}
+    footer .cols{grid-template-columns:1fr}
+    .track{grid-template-columns:auto 1fr auto;grid-auto-rows:auto}
+    .track .node:nth-child(5),.track .wire:nth-child(4){display:none}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .wire::after{animation:none;left:0;width:100%;opacity:.5}
+  }
+  :focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:6px}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="glyph"><i class="ring"></i><i class="core"></i></span>
+    <span class="brand"><b>OneTelGem</b> · internal tool</span>
+  </header>
+
+  <p class="eyebrow">2nd-tenant → revenue model</p>
+  <h1>Turn a community-anchor sheet into a <span class="lit">priced, tiered</span> revenue model.</h1>
+  <p class="lede">Drop in a 2nd-tenant sheet and get back the full workbook — Rate Card, per-site Revenue Model with build tiers, Summary, and Cost-to-Serve — with live formulas you can keep tuning. Everything runs in your browser; the file never leaves your machine.</p>
+
+  <div class="track" aria-hidden="true">
+    <div class="node" id="n-up"><span class="dot"></span><small>Upload</small></div>
+    <div class="wire" id="w-1"></div>
+    <div class="node" id="n-model"><span class="dot"></span><small>Model</small></div>
+    <div class="wire" id="w-2"></div>
+    <div class="node" id="n-down"><span class="dot"></span><small>Download</small></div>
+  </div>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload a 2nd-tenant sheet">
+    <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M5 11l7-7 7 7"/><path d="M5 20h14"/></svg></div>
+    <h2>Drop a 2nd-tenant sheet here</h2>
+    <p>or click to browse — .xlsx files</p>
+    <div class="req">needs a <b>Community Anchors</b> tab</div>
+  </div>
+  <input type="file" id="file" accept=".xlsx,.xls" />
+
+  <div class="options">
+    <div class="opt">
+      <label>Pricing tier</label>
+      <div class="seg" id="tierSeg">
+        <button data-tier="Low" class="sel">Low</button>
+        <button data-tier="Mid">Mid</button>
+        <button data-tier="High">High</button>
+      </div>
+    </div>
+    <div class="opt">
+      <label>Average close rate</label>
+      <div class="rate"><input id="close" type="number" min="0" max="100" step="1" value="20" /><span>% of sites</span></div>
+    </div>
+    <div class="opt">
+      <label>Duplicates</label>
+      <div class="toggle" id="dedupT" role="switch" aria-checked="false" tabindex="0">
+        <span class="sw"></span><span>Keep all rows</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="msg err" id="err"></div>
+  <div class="msg warn" id="warn"></div>
+
+  <div class="readout" id="readout">
+    <div class="ro-head">
+      <h3>Model preview</h3>
+      <span class="file" id="roFile"></span>
+    </div>
+    <div class="telemetry">
+      <div class="cell"><div class="k">Sites</div><div class="v" id="mSites">—</div><div class="sub" id="mSitesSub"></div></div>
+      <div class="cell"><div class="k">Gross MRC / mo</div><div class="v" id="mMrc">—</div></div>
+      <div class="cell"><div class="k">Gross ARR</div><div class="v" id="mArr">—</div></div>
+      <div class="cell"><div class="k">Weighted ARR</div><div class="v teal" id="mWarr">—</div><div class="sub" id="mWarrSub"></div></div>
+    </div>
+    <div class="tiers">
+      <div class="th">Footprint by build tier (cost-to-serve)</div>
+      <div id="tierBars"></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="download" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>
+      Download revenue model
+    </button>
+    <button class="btn ghost" id="reset" style="display:none">Start over</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- config / pricing (mirrors the v2 Rate Card) ----------
+  var TIER_IDX = {Low:0, Mid:1, High:2};
+  var DIA = {"500 Mbps":[600,900,1200], "1 Gbps":[800,1300,1800], "10 Gbps":[2500,4250,6000]};
+  var WAN = {"500 Mbps":[400,650,900],  "1 Gbps":[500,850,1200],  "10 Gbps":[1500,2750,4000]};
+  // default speed by site type (WAN, DIA)
+  var KNOWN = {
+    "k12":["1 Gbps","500 Mbps"], "higthed":null
+  };
+  var SPEED_MAP = [
+    {keys:["k-12","k12"],            wan:"1 Gbps",  dia:"500 Mbps"},
+    {keys:["higher ed","highered"],  wan:"10 Gbps", dia:"1 Gbps"},
+    {keys:["research"],              wan:"10 Gbps", dia:"1 Gbps"},
+    {keys:["medical/healthcare","medical","healthcare"], wan:"10 Gbps", dia:"1 Gbps"},
+    {keys:["government","gov"],      wan:"1 Gbps",  dia:"500 Mbps"},
+    {keys:["non-profit/cultural","nonprofit","cultural","non profit"], wan:"500 Mbps", dia:"500 Mbps"}
+  ];
+  var DEFAULT_SPEED = {wan:"1 Gbps", dia:"500 Mbps"};
+  var TIERS = [
+    {name:"Lit (on-building)",             nrc:0,     note:"Fiber in building. Near-zero build. Best margin."},
+    {name:"Near-net (<=500 ft)",           nrc:500,   note:"Minimal lateral build. Low cost-to-serve."},
+    {name:"Near-net (501-1,000 ft)",       nrc:1500,  note:"Short build. Moderate-low cost."},
+    {name:"Build (1,001-2,500 ft)",        nrc:5000,  note:"Construction required. Moderate NRC."},
+    {name:"Extended build (2,501-7,500 ft)",nrc:12000,note:"Longer build. Higher NRC; check economics."}
+  ];
+
+  // ---------- styling tokens for the workbook (matches the boss's file) ----------
+  var C = {navy:"FF1F4E78", white:"FFFFFFFF", yellow:"FFFFFF00", blue:"FF0000FF",
+           green:"FFE2EFDA", lblue:"FFDDEBF7", grey:"FFBFBFBF", grey6:"FF595959"};
+  var CUR = '$#,##0;"($"#,##0);-';
+  var ARIAL = "Arial";
+
+  // ---------- helpers ----------
+  function norm(s){ return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9]/g,""); }
+  function speedFor(type){
+    var n = norm(type);
+    for(var i=0;i<SPEED_MAP.length;i++){
+      var m=SPEED_MAP[i];
+      for(var k=0;k<m.keys.length;k++){ if(n===norm(m.keys[k])) return {wan:m.wan,dia:m.dia}; }
+    }
+    return DEFAULT_SPEED;
+  }
+  function tierName(dist){
+    if(dist==="Lit") return TIERS[0].name;
+    var n = Number(dist);
+    if(!isFinite(n)) return TIERS[4].name;
+    if(n<=500) return TIERS[1].name;
+    if(n<=1000) return TIERS[2].name;
+    if(n<=2500) return TIERS[3].name;
+    return TIERS[4].name;
+  }
+  function cellText(v){
+    if(v==null) return "";
+    if(typeof v==="object"){
+      if(v.richText) return v.richText.map(function(t){return t.text;}).join("");
+      if(v.text!=null) return String(v.text);
+      if(v.result!=null) return String(v.result);
+      if(v.formula!=null) return "";
+      return String(v);
+    }
+    return String(v);
+  }
+  function money(n){ return "$"+Math.round(n).toLocaleString(); }
+  function $(id){ return document.getElementById(id); }
+
+  // ---------- state ----------
+  var rawRows = [];          // {type,name,city,state,dist,fiber}
+  var fileBase = "model";
+  var opts = {tier:"Low", close:0.20, dedup:false};
+
+  // ---------- parse uploaded workbook ----------
+  function readFile(file){
+    clearMsgs();
+    fileBase = file.name.replace(/\.(xlsx|xls)$/i,"") || "model";
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var wb = new ExcelJS.Workbook();
+      wb.xlsx.load(e.target.result).then(function(){
+        try{ parseWorkbook(wb); }
+        catch(ex){ showErr("Could not read that sheet. "+ex.message); }
+      }).catch(function(ex){
+        showErr("That file did not open as an .xlsx. "+ (ex&&ex.message||"")); 
+      });
+    };
+    reader.onerror = function(){ showErr("Could not read the file."); };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function parseWorkbook(wb){
+    var ws = null;
+    wb.eachSheet(function(s){ if(!ws && /anchor/i.test(s.name)) ws = s; });
+    if(!ws) ws = wb.worksheets[0];
+    if(!ws) throw new Error("No worksheets found.");
+
+    // find header row (within first 6 rows) holding Building Type + Entity Name
+    var headerRow=-1, map={};
+    for(var r=1;r<=Math.min(6,ws.rowCount);r++){
+      var vals = ws.getRow(r).values || [];
+      var found={};
+      for(var c=1;c<vals.length;c++){
+        var t = norm(cellText(vals[c]));
+        if(t==="buildingtype") found.type=c;
+        else if(t==="entityname") found.name=c;
+        else if(t==="city") found.city=c;
+        else if(t==="state") found.state=c;
+        else if(t==="distancetozayo"||t==="disttozayo"||t==="distancetozayoft") found.dist=c;
+        else if(t==="fibertype") found.fiber=c;
+      }
+      if(found.type && found.name){ headerRow=r; map=found; break; }
+    }
+    if(headerRow<0) throw new Error("Couldn't find the header row — expected columns like 'Building Type' and 'Entity Name' in a Community Anchors tab.");
+
+    var rows=[];
+    for(var rr=headerRow+1; rr<=ws.rowCount; rr++){
+      var row = ws.getRow(rr).values || [];
+      var name = cellText(row[map.name]).trim();
+      if(!name) continue;
+      var distRaw = map.dist ? row[map.dist] : null;
+      var distTxt = cellText(distRaw).trim();
+      var dist;
+      if(/^lit$/i.test(distTxt)) dist="Lit";
+      else if(distTxt!=="" && isFinite(Number(distTxt))) dist=Number(distTxt);
+      else dist=distTxt;   // e.g. "Out of Range" / blank -> treated as far by tier()
+      rows.push({
+        type: cellText(row[map.type]).trim() || "Unspecified",
+        name: name,
+        city: map.city ? cellText(row[map.city]).trim() : "",
+        state: map.state ? cellText(row[map.state]).trim() : "",
+        dist: dist,
+        fiber: map.fiber ? cellText(row[map.fiber]).trim() : ""
+      });
+    }
+    if(!rows.length) throw new Error("Found the header but no site rows under it.");
+
+    rawRows = rows;
+    setNode("n-up", true);
+    refresh();
+  }
+
+  // dedupe by entity name, keep first
+  function effectiveRows(){
+    if(!opts.dedup) return rawRows.slice();
+    var seen={}, out=[];
+    rawRows.forEach(function(r){ if(!seen[r.name]){ seen[r.name]=1; out.push(r); } });
+    return out;
+  }
+
+  // ---------- compute preview + enrich rows ----------
+  function enrich(rows){
+    var ti = TIER_IDX[opts.tier];
+    return rows.map(function(r,i){
+      var sp = speedFor(r.type);
+      var wanMrc = (WAN[sp.wan]||WAN["1 Gbps"])[ti];
+      var diaMrc = (DIA[sp.dia]||DIA["500 Mbps"])[ti];
+      var total = wanMrc+diaMrc;
+      return {
+        idx:i+1, type:r.type, name:r.name, city:r.city, state:r.state,
+        dist:r.dist, fiber:r.fiber,
+        wanSpeed:sp.wan, diaSpeed:sp.dia, wanMrc:wanMrc, diaMrc:diaMrc,
+        total:total, arr:total*12, wmrc:total*opts.close, warr:total*12*opts.close,
+        tier: tierName(r.dist)
+      };
+    });
+  }
+
+  function refresh(){
+    if(!rawRows.length) return;
+    var rows = effectiveRows();
+    var data = enrich(rows);
+    var sites=data.length;
+    var gMrc=0,gArr=0,wArr=0, byTier={};
+    TIERS.forEach(function(t){ byTier[t.name]=0; });
+    data.forEach(function(d){ gMrc+=d.total; gArr+=d.arr; wArr+=d.warr; byTier[d.tier]++; });
+
+    $("mSites").textContent = sites.toLocaleString();
+    var removed = rawRows.length - rows.length;
+    $("mSitesSub").textContent = opts.dedup && removed>0 ? (removed+" dup"+(removed>1?"s":"")+" removed") : "";
+    $("mMrc").textContent = money(gMrc);
+    $("mArr").textContent = money(gArr);
+    $("mWarr").textContent = money(wArr);
+    $("mWarrSub").textContent = Math.round(opts.close*100)+"% close · "+opts.tier;
+    $("roFile").textContent = fileBase + "_Revenue_Model.xlsx";
+
+    var max=1; TIERS.forEach(function(t){ if(byTier[t.name]>max) max=byTier[t.name]; });
+    var html="";
+    TIERS.forEach(function(t){
+      var ct=byTier[t.name], pct=Math.round(ct/max*100);
+      html+='<div class="bar"><span class="name">'+t.name+'</span>'+
+            '<span class="meter"><i style="width:'+pct+'%"></i></span>'+
+            '<span class="ct">'+ct+'</span></div>';
+    });
+    $("tierBars").innerHTML = html;
+
+    $("readout").classList.add("show");
+    $("download").disabled = false;
+    $("reset").style.display = "";
+    setNode("n-model", true);
+
+    // building types not in the standard map -> gentle heads-up
+    var unknown={};
+    rawRows.forEach(function(r){ var s=speedFor(r.type); if(s===DEFAULT_SPEED) unknown[r.type]=1; });
+    var uk=Object.keys(unknown);
+    if(uk.length){
+      showWarn("Some site types aren't in the standard speed table — defaulted to WAN 1 Gbps / DIA 500 Mbps: "+uk.slice(0,6).join(", ")+(uk.length>6?"…":"")+". You can edit them on the Rate Card tab after download.");
+    } else clearWarn();
+  }
+
+  // ---------- build the .xlsx ----------
+  function buildWorkbook(){
+    var rows = effectiveRows();
+    var data = enrich(rows);
+    var N = data.length;
+    var last = 4 + N;       // last data row in Revenue Model
+    var totalRow = 5 + N;
+
+    // distinct types in first-appearance order -> Rate Card default-speed table
+    var types=[], seen={};
+    rows.forEach(function(r){ if(!seen[r.type]){ seen[r.type]=1; types.push(r.type); } });
+    var spStart=23, spEnd=22+types.length;
+
+    var wb = new ExcelJS.Workbook();
+    wb.creator = "2nd-Tenant Revenue Model Builder";
+    wb.calcProperties.fullCalcOnLoad = true;
+
+    var hdrFont={name:ARIAL,bold:true,color:{argb:C.white},size:11};
+    var navyFill={type:"pattern",pattern:"solid",fgColor:{argb:C.navy}};
+    var ctr={horizontal:"center",vertical:"middle",wrapText:true};
+    var thin={style:"thin",color:{argb:C.grey}};
+    var border={top:thin,left:thin,bottom:thin,right:thin};
+    function hdr(cell,txt){ cell.value=txt; cell.font=hdrFont; cell.fill=navyFill; cell.alignment=ctr; cell.border=border; }
+    function inputCell(cell,val,fmt){ cell.value=val; cell.font={name:ARIAL,color:{argb:C.blue},size:11};
+      cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:C.yellow}}; cell.alignment={horizontal:"center"};
+      if(fmt) cell.numFmt=fmt; cell.border=border; }
+    function note(ws,addr,txt){ ws.getCell(addr).value=txt; ws.getCell(addr).font={name:ARIAL,italic:true,size:9,color:{argb:C.grey6}}; }
+
+    /* ===== Rate Card ===== */
+    var rc = wb.addWorksheet("Rate Card",{views:[{showGridLines:false}]});
+    rc.getColumn(1).width=34; rc.getColumn(2).width=12; rc.getColumn(3).width=12; rc.getColumn(4).width=44;
+    rc.getCell("A1").value="Rate Card & Assumptions"; rc.getCell("A1").font={name:ARIAL,bold:true,size:14};
+    note(rc,"A2","Monthly recurring charge (MRC) per circuit. Denver/Aurora metro, on-net fiber (build already done = 2nd-tenant case).");
+    note(rc,"A3","Planning ranges from telecom market knowledge — carrier DIA/WAN pricing is quote-based and not published. Not derived from the uploaded file.");
+    rc.getCell("A5").value="Selected pricing tier:"; rc.getCell("A5").font={name:ARIAL,bold:true,size:11};
+    inputCell(rc.getCell("C5"), opts.tier); rc.getCell("C5").border=undefined;
+    note(rc,"D5","← change to Low / Mid / High; whole model updates");
+    rc.getCell("A6").value="Average close rate:"; rc.getCell("A6").font={name:ARIAL,bold:true,size:11};
+    inputCell(rc.getCell("C6"), opts.close, "0%"); rc.getCell("C6").border=undefined;
+    note(rc,"D6","← win/close probability applied to every site (weighted revenue). e.g. 0.20 = 20%");
+
+    rc.getCell("A8").value="Dedicated Internet Access (DIA) — symmetric, SLA, IP transit"; rc.getCell("A8").font={name:ARIAL,bold:true,size:11};
+    ["Speed","Low","Mid","High"].forEach(function(t,i){ hdr(rc.getCell(9,i+1),t); });
+    [["500 Mbps"].concat(DIA["500 Mbps"]),["1 Gbps"].concat(DIA["1 Gbps"]),["10 Gbps"].concat(DIA["10 Gbps"])]
+      .forEach(function(row,ri){ var R=10+ri; rc.getCell(R,1).value=row[0]; rc.getCell(R,1).font={name:ARIAL,size:11};
+        for(var c=2;c<=4;c++){ inputCell(rc.getCell(R,c),row[c-1],CUR); rc.getCell(R,c).border=undefined; rc.getCell(R,c).fill=undefined;
+          rc.getCell(R,c).alignment={horizontal:"right"}; } });
+
+    rc.getCell("A14").value="WAN — metro point-to-point Ethernet / E-Line (no internet)"; rc.getCell("A14").font={name:ARIAL,bold:true,size:11};
+    ["Speed","Low","Mid","High"].forEach(function(t,i){ hdr(rc.getCell(15,i+1),t); });
+    [["500 Mbps"].concat(WAN["500 Mbps"]),["1 Gbps"].concat(WAN["1 Gbps"]),["10 Gbps"].concat(WAN["10 Gbps"])]
+      .forEach(function(row,ri){ var R=16+ri; rc.getCell(R,1).value=row[0]; rc.getCell(R,1).font={name:ARIAL,size:11};
+        for(var c=2;c<=4;c++){ inputCell(rc.getCell(R,c),row[c-1],CUR); rc.getCell(R,c).border=undefined; rc.getCell(R,c).fill=undefined;
+          rc.getCell(R,c).alignment={horizontal:"right"}; } });
+
+    rc.getCell("A21").value="Default speed by site type (editable)"; rc.getCell("A21").font={name:ARIAL,bold:true,size:11};
+    ["Building Type","WAN Speed","DIA Speed"].forEach(function(t,i){ hdr(rc.getCell(22,i+1),t); });
+    types.forEach(function(tp,i){ var R=23+i; var sp=speedFor(tp);
+      rc.getCell(R,1).value=tp; rc.getCell(R,1).font={name:ARIAL,size:11};
+      inputCell(rc.getCell(R,2),sp.wan); rc.getCell(R,2).numFmt=undefined;
+      inputCell(rc.getCell(R,3),sp.dia); rc.getCell(R,3).numFmt=undefined; });
+    note(rc,"A"+(spEnd+2),"Note: In K-12 networks WAN is the per-building product (every site lit back to a hub); DIA is usually bought centrally");
+    note(rc,"A"+(spEnd+3),"at the district core, not per school. Per-site DIA here is illustrative — see 'If DIA centralized' on the Summary tab.");
+
+    /* ===== Revenue Model ===== */
+    var rm = wb.addWorksheet("Revenue Model",{views:[{showGridLines:false,state:"frozen",ySplit:4}]});
+    rm.getCell("A1").value="Per-Site Revenue Model"; rm.getCell("A1").font={name:ARIAL,bold:true,size:14};
+    note(rm,"A2","Blue = editable inputs on Rate Card. MRC pulls from Rate Card at the selected tier. Weighted columns apply the close rate (Rate Card C6).");
+    var heads=["#","Building Type","Entity Name","City","Dist. to Zayo (ft)","Fiber Type","WAN Speed","WAN MRC","DIA Speed","DIA MRC","Total MRC","Annual (ARR)","Weighted MRC","Weighted ARR","Build Tier"];
+    heads.forEach(function(h,i){ hdr(rm.getCell(4,i+1),h); });
+    var w=[5,18,42,10,15,13,12,11,12,11,12,13,13,13,26];
+    w.forEach(function(x,i){ rm.getColumn(i+1).width=x; });
+
+    var spRange = "'Rate Card'!$A$23:$C$"+spEnd;
+    data.forEach(function(d,i){
+      var R=5+i;
+      rm.getCell(R,1).value=d.idx;
+      rm.getCell(R,2).value=d.type;
+      rm.getCell(R,3).value=d.name;
+      rm.getCell(R,4).value=d.city;
+      rm.getCell(R,5).value=d.dist;
+      rm.getCell(R,6).value=d.fiber;
+      rm.getCell(R,7).value={formula:"VLOOKUP(B"+R+","+spRange+",2,0)", result:d.wanSpeed};
+      rm.getCell(R,8).value={formula:"VLOOKUP(G"+R+",'Rate Card'!$A$16:$D$18,MATCH('Rate Card'!$C$5,'Rate Card'!$B$9:$D$9,0)+1,0)", result:d.wanMrc};
+      rm.getCell(R,9).value={formula:"VLOOKUP(B"+R+","+spRange+",3,0)", result:d.diaSpeed};
+      rm.getCell(R,10).value={formula:"VLOOKUP(I"+R+",'Rate Card'!$A$10:$D$12,MATCH('Rate Card'!$C$5,'Rate Card'!$B$9:$D$9,0)+1,0)", result:d.diaMrc};
+      rm.getCell(R,11).value={formula:"H"+R+"+J"+R, result:d.total};
+      rm.getCell(R,12).value={formula:"K"+R+"*12", result:d.arr};
+      rm.getCell(R,13).value={formula:"K"+R+"*'Rate Card'!$C$6", result:d.wmrc};
+      rm.getCell(R,14).value={formula:"L"+R+"*'Rate Card'!$C$6", result:d.warr};
+      rm.getCell(R,15).value={formula:'IF(E'+R+'="Lit","Lit (on-building)",IF(E'+R+'<=500,"Near-net (<=500 ft)",IF(E'+R+'<=1000,"Near-net (501-1,000 ft)",IF(E'+R+'<=2500,"Build (1,001-2,500 ft)","Extended build (2,501-7,500 ft)"))))', result:d.tier};
+      [5].forEach(function(c){ rm.getCell(R,c).alignment={horizontal:"center"}; });
+      [8,10,11,12,13,14].forEach(function(c){ rm.getCell(R,c).numFmt=CUR; });
+      for(var c=1;c<=15;c++){ var cc=rm.getCell(R,c); if(!cc.font) cc.font={name:ARIAL,size:11}; }
+    });
+    // TOTAL row
+    var TR=totalRow;
+    rm.getCell(TR,3).value="TOTAL"; rm.getCell(TR,3).font={name:ARIAL,bold:true,size:11};
+    var sums={8:0,10:0,11:0,12:0,13:0,14:0};
+    data.forEach(function(d){ sums[8]+=d.wanMrc;sums[10]+=d.diaMrc;sums[11]+=d.total;sums[12]+=d.arr;sums[13]+=d.wmrc;sums[14]+=d.warr; });
+    [8,10,11,12,13,14].forEach(function(c){ var L=colLetter(c);
+      rm.getCell(TR,c).value={formula:"SUM("+L+"5:"+L+last+")", result:sums[c]};
+      rm.getCell(TR,c).numFmt=CUR; rm.getCell(TR,c).font={name:ARIAL,bold:true,size:11};
+      rm.getCell(TR,c).fill={type:"pattern",pattern:"solid",fgColor:{argb:C.green}}; });
+
+    /* ===== Summary ===== */
+    var sm = wb.addWorksheet("Summary",{views:[{showGridLines:false}]});
+    sm.getColumn(1).width=46; sm.getColumn(2).width=16;
+    sm.getCell("A1").value="Revenue Summary"; sm.getCell("A1").font={name:ARIAL,bold:true,size:14};
+    sm.getCell("A2").value={formula:'"Pricing tier: "&\'Rate Card\'!C5&"  |  Close rate: "&TEXT(\'Rate Card\'!C6,"0%")&"  |  Sites: "&COUNTA(\'Revenue Model\'!C5:C'+last+')',
+      result:"Pricing tier: "+opts.tier+"  |  Close rate: "+Math.round(opts.close*100)+"%  |  Sites: "+N};
+    sm.getCell("A2").font={name:ARIAL,italic:true,size:10,color:{argb:C.grey6}};
+    function section(addr,txt){ sm.getCell(addr).value=txt; sm.getCell(addr).font={name:ARIAL,bold:true,size:11};
+      sm.getCell(addr).fill={type:"pattern",pattern:"solid",fgColor:{argb:C.lblue}}; }
+    function line(R,label,formula,result,fmt){ sm.getCell(R,1).value=label; sm.getCell(R,1).font={name:ARIAL,size:11};
+      sm.getCell(R,2).value={formula:formula,result:result}; sm.getCell(R,2).font={name:ARIAL,bold:true,size:11};
+      sm.getCell(R,2).numFmt=fmt||CUR; }
+    var avgW=sums[8]/N, avgD=sums[10]/N, avgT=sums[11]/N;
+    section("A4","Per-site averages (gross)");
+    line(5,"Avg WAN MRC / site","AVERAGE('Revenue Model'!H5:H"+last+")",avgW);
+    line(6,"Avg DIA MRC / site","AVERAGE('Revenue Model'!J5:J"+last+")",avgD);
+    line(7,"Avg Total MRC / site","AVERAGE('Revenue Model'!K5:K"+last+")",avgT);
+    section("A9","Portfolio totals (gross — all sites take both)");
+    line(10,"Total WAN MRC","SUM('Revenue Model'!H5:H"+last+")",sums[8]);
+    line(11,"Total DIA MRC","SUM('Revenue Model'!J5:J"+last+")",sums[10]);
+    line(12,"Total MRC","SUM('Revenue Model'!K5:K"+last+")",sums[11]);
+    line(13,"Total ARR","SUM('Revenue Model'!L5:L"+last+")",sums[12]);
+    section("A15","Expected (weighted by close rate)");
+    line(16,"Close rate","'Rate Card'!$C$6",opts.close,"0%");
+    line(17,"Expected MRC","B12*'Rate Card'!$C$6",sums[11]*opts.close);
+    line(18,"Expected ARR","B13*'Rate Card'!$C$6",sums[12]*opts.close);
+    section("A20","Scenario views");
+    line(21,"WAN-only ARR (gross)","SUM('Revenue Model'!H5:H"+last+")*12",sums[8]*12);
+    line(22,"WAN-only ARR (weighted)","B21*'Rate Card'!$C$6",sums[8]*12*opts.close);
+    var core10 = DIA["10 Gbps"][TIER_IDX[opts.tier]];
+    line(23,"If DIA centralized: 2x 10G core pipes ARR (gross)",
+      "2*VLOOKUP(\"10 Gbps\",'Rate Card'!$A$10:$D$12,MATCH('Rate Card'!$C$5,'Rate Card'!$B$9:$D$9,0)+1,0)*12",
+      2*core10*12);
+    line(24,"WAN (weighted) + centralized DIA ARR","B22+B23",sums[8]*12*opts.close + 2*core10*12);
+
+    /* ===== Cost-to-Serve ===== */
+    var cs = wb.addWorksheet("Cost-to-Serve",{views:[{showGridLines:false}]});
+    var cw=[30,8,13,13,14,16,15,12,40]; cw.forEach(function(x,i){ cs.getColumn(i+1).width=x; });
+    cs.getCell("A1").value="Cost-to-Serve by Build Tier"; cs.getCell("A1").font={name:ARIAL,bold:true,size:14};
+    note(cs,"A2","Build distance to Zayo fiber is a proxy for one-time build / NRC cost. Pairs the revenue model with what each tier costs to light.");
+    note(cs,"A3","Build/NRC per site = illustrative planning figures (yellow, editable). Not from the source file. Revenue pulls live from the Revenue Model.");
+    var ch=["Build Tier","# Sites","Gross MRC","Gross ARR","Weighted ARR","Build/NRC per site","Total Build/NRC","Payback (mo)","Cost-to-serve note"];
+    ch.forEach(function(h,i){ hdr(cs.getCell(5,i+1),h); });
+    var O="'Revenue Model'!$O$5:$O$"+last, K="'Revenue Model'!$K$5:$K$"+last, Lr="'Revenue Model'!$L$5:$L$"+last, Nr="'Revenue Model'!$N$5:$N$"+last;
+    // compute tier aggregates
+    var agg={}; TIERS.forEach(function(t){ agg[t.name]={n:0,mrc:0,arr:0,warr:0}; });
+    data.forEach(function(d){ var a=agg[d.tier]; a.n++; a.mrc+=d.total; a.arr+=d.arr; a.warr+=d.warr; });
+    var first=6;
+    TIERS.forEach(function(t,i){ var R=first+i; var a=agg[t.name];
+      cs.getCell(R,1).value=t.name; cs.getCell(R,1).font={name:ARIAL,size:10};
+      cs.getCell(R,2).value={formula:'COUNTIF('+O+',A'+R+')',result:a.n}; cs.getCell(R,2).alignment={horizontal:"center"};
+      cs.getCell(R,3).value={formula:'SUMIF('+O+',A'+R+','+K+')',result:a.mrc};
+      cs.getCell(R,4).value={formula:'SUMIF('+O+',A'+R+','+Lr+')',result:a.arr};
+      cs.getCell(R,5).value={formula:'SUMIF('+O+',A'+R+','+Nr+')',result:a.warr};
+      inputCell(cs.getCell(R,6),t.nrc,CUR);
+      cs.getCell(R,7).value={formula:'B'+R+'*F'+R,result:a.n*t.nrc};
+      cs.getCell(R,8).value={formula:'IFERROR(G'+R+'/C'+R+',0)',result:a.mrc?a.n*t.nrc/a.mrc:0};
+      cs.getCell(R,9).value=t.note; cs.getCell(R,9).font={name:ARIAL,size:9,color:{argb:C.grey6}};
+      [3,4,5,7].forEach(function(c){ cs.getCell(R,c).numFmt=CUR; });
+      cs.getCell(R,8).numFmt="0.0"; cs.getCell(R,8).alignment={horizontal:"center"};
+      for(var c=1;c<=9;c++){ cs.getCell(R,c).border=border; if(!cs.getCell(R,c).font) cs.getCell(R,c).font={name:ARIAL,size:10}; }
+    });
+    var tr=first+TIERS.length;
+    cs.getCell(tr,1).value="TOTAL";
+    cs.getCell(tr,2).value={formula:"SUM(B"+first+":B"+(tr-1)+")",result:N}; cs.getCell(tr,2).alignment={horizontal:"center"};
+    var tMrc=0,tArr=0,tWarr=0,tNrc=0; TIERS.forEach(function(t){ var a=agg[t.name]; tMrc+=a.mrc;tArr+=a.arr;tWarr+=a.warr;tNrc+=a.n*t.nrc; });
+    [[3,tMrc],[4,tArr],[5,tWarr],[7,tNrc]].forEach(function(p){ var L=colLetter(p[0]);
+      cs.getCell(tr,p[0]).value={formula:"SUM("+L+first+":"+L+(tr-1)+")",result:p[1]}; cs.getCell(tr,p[0]).numFmt=CUR; });
+    cs.getCell(tr,8).value={formula:"IFERROR(G"+tr+"/C"+tr+",0)",result:tMrc?tNrc/tMrc:0};
+    cs.getCell(tr,8).numFmt="0.0"; cs.getCell(tr,8).alignment={horizontal:"center"};
+    for(var c=1;c<=9;c++){ cs.getCell(tr,c).fill={type:"pattern",pattern:"solid",fgColor:{argb:C.green}};
+      cs.getCell(tr,c).border=border; cs.getCell(tr,c).font={name:ARIAL,bold:true,size:10}; }
+    // low-build callout
+    var lowN=agg[TIERS[0].name].n+agg[TIERS[1].name].n+agg[TIERS[2].name].n;
+    var lowArr=agg[TIERS[0].name].arr+agg[TIERS[1].name].arr+agg[TIERS[2].name].arr;
+    var cr=tr+2;
+    cs.getCell(cr,1).value="Low-build footprint (Lit + near-net <=1,000 ft)";
+    cs.getCell(cr,1).font={name:ARIAL,bold:true,size:10,color:{argb:C.navy}};
+    cs.getCell(cr,1).fill={type:"pattern",pattern:"solid",fgColor:{argb:C.lblue}};
+    cs.getCell(cr+1,1).value="Sites"; cs.getCell(cr+1,1).font={name:ARIAL,size:10};
+    cs.getCell(cr+1,2).value={formula:"B"+first+"+B"+(first+1)+"+B"+(first+2),result:lowN}; cs.getCell(cr+1,2).alignment={horizontal:"center"};
+    cs.getCell(cr+2,1).value="% of footprint"; cs.getCell(cr+2,1).font={name:ARIAL,size:10};
+    cs.getCell(cr+2,2).value={formula:"IFERROR(B"+(cr+1)+"/B"+tr+",0)",result:N?lowN/N:0}; cs.getCell(cr+2,2).numFmt="0%"; cs.getCell(cr+2,2).alignment={horizontal:"center"};
+    cs.getCell(cr+3,1).value="Gross ARR from low-build sites"; cs.getCell(cr+3,1).font={name:ARIAL,size:10};
+    cs.getCell(cr+3,2).value={formula:"D"+first+"+D"+(first+1)+"+D"+(first+2),result:lowArr}; cs.getCell(cr+3,2).numFmt=CUR;
+    note(cs,"A"+(cr+5),"Margin read: the Lit and near-net tiers carry low build cost. The Build and Extended-build tiers are where per-site target rates should rise (or be qualified) to cover NRC. Tune the yellow Build/NRC cells to your real construction estimates.");
+    // dedupe data-quality note
+    var removed = rawRows.length - rows.length;
+    if(!opts.dedup){
+      var dupCount = rawRows.length - uniqueCount(rawRows);
+      if(dupCount>0) noteRed(cs,"A"+(cr+8),"Data note: the uploaded list has ~"+dupCount+" repeated entit"+(dupCount>1?"ies":"y")+", so gross totals overstate by that many sites. Re-run with 'Remove duplicates' on for a clean count.");
+    } else if(removed>0){
+      note(cs,"A"+(cr+8),"Note: "+removed+" duplicate row"+(removed>1?"s":"")+" removed before modeling.");
+    }
+
+    /* ===== Source data pass-through ===== */
+    var src = wb.addWorksheet("Community Anchors (source)",{views:[{showGridLines:false,state:"frozen",ySplit:1}]});
+    ["Building Type","Entity Name","City","State","Distance to Zayo","Fiber Type"].forEach(function(h,i){ hdr(src.getCell(1,i+1),h); });
+    [18,40,14,7,16,15].forEach(function(x,i){ src.getColumn(i+1).width=x; });
+    rows.forEach(function(r,i){ var R=i+2;
+      src.getCell(R,1).value=r.type; src.getCell(R,2).value=r.name; src.getCell(R,3).value=r.city;
+      src.getCell(R,4).value=r.state; src.getCell(R,5).value=r.dist; src.getCell(R,6).value=r.fiber;
+      for(var c=1;c<=6;c++) src.getCell(R,c).font={name:ARIAL,size:10}; });
+
+    return wb;
+  }
+
+  function uniqueCount(rows){ var s={},n=0; rows.forEach(function(r){ if(!s[r.name]){s[r.name]=1;n++;} }); return n; }
+  function colLetter(n){ var s=""; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; }
+  function noteRed(ws,addr,txt){ ws.getCell(addr).value=txt; ws.getCell(addr).font={name:ARIAL,italic:true,size:9,color:{argb:"FFC00000"}}; }
+
+  function download(){
+    if(!rawRows.length) return;
+    var btn=$("download"); var orig=btn.innerHTML; btn.disabled=true; btn.textContent="Building…";
+    try{
+      var wb = buildWorkbook();
+      wb.xlsx.writeBuffer().then(function(buf){
+        var blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+        var url=URL.createObjectURL(blob); var a=document.createElement("a");
+        a.href=url; a.download=fileBase+"_Revenue_Model.xlsx"; document.body.appendChild(a); a.click();
+        document.body.removeChild(a); setTimeout(function(){ URL.revokeObjectURL(url); },1500);
+        setNode("n-down", true);
+        btn.disabled=false; btn.innerHTML=orig;
+      }).catch(function(ex){ showErr("Couldn't generate the file. "+(ex&&ex.message||"")); btn.disabled=false; btn.innerHTML=orig; });
+    }catch(ex){ showErr("Couldn't build the model. "+ex.message); btn.disabled=false; btn.innerHTML=orig; }
+  }
+
+  // ---------- UI wiring ----------
+  function setNode(id,on){ var n=$(id); if(n) n.classList.toggle("on",!!on); }
+  function showErr(m){ var e=$("err"); e.textContent=m; e.classList.add("show"); }
+  function clearErr(){ $("err").classList.remove("show"); }
+  function showWarn(m){ var w=$("warn"); w.textContent=m; w.classList.add("show"); }
+  function clearWarn(){ $("warn").classList.remove("show"); }
+  function clearMsgs(){ clearErr(); clearWarn(); }
+
+  function checkLib(){
+    if(typeof ExcelJS==="undefined"){
+      showErr("The spreadsheet library didn't load. Check your internet connection and refresh — this page loads ExcelJS from a public CDN.");
+      return false;
+    }
+    return true;
+  }
+
+  var drop=$("drop"), fileInput=$("file");
+  drop.addEventListener("click", function(){ if(checkLib()) fileInput.click(); });
+  drop.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); if(checkLib()) fileInput.click(); } });
+  ["dragenter","dragover"].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.add("drag"); }); });
+  ["dragleave","drop"].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.remove("drag"); }); });
+  drop.addEventListener("drop", function(e){ if(!checkLib()) return; var f=e.dataTransfer.files[0]; if(f) readFile(f); });
+  fileInput.addEventListener("change", function(){ var f=this.files[0]; if(f) readFile(f); this.value=""; });
+
+  // tier segmented control
+  Array.prototype.forEach.call($("tierSeg").children, function(b){
+    b.addEventListener("click", function(){
+      Array.prototype.forEach.call($("tierSeg").children,function(x){x.classList.remove("sel");});
+      b.classList.add("sel"); opts.tier=b.getAttribute("data-tier"); refresh();
+    });
+  });
+  // close rate
+  $("close").addEventListener("input", function(){
+    var v=parseFloat(this.value); if(isNaN(v)) v=0; v=Math.max(0,Math.min(100,v));
+    opts.close=v/100; refresh();
+  });
+  // dedup toggle
+  var dt=$("dedupT");
+  function setDedup(on){ opts.dedup=on; dt.classList.toggle("on",on); dt.setAttribute("aria-checked",on?"true":"false");
+    dt.querySelector("span:last-child").textContent = on ? "Remove duplicates" : "Keep all rows"; refresh(); }
+  dt.addEventListener("click", function(){ setDedup(!opts.dedup); });
+  dt.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setDedup(!opts.dedup); } });
+
+  $("download").addEventListener("click", download);
+  $("reset").addEventListener("click", function(){
+    rawRows=[]; $("readout").classList.remove("show"); $("download").disabled=true; this.style.display="none";
+    clearMsgs(); ["n-up","n-model","n-down"].forEach(function(id){ setNode(id,false); });
+  });
+
+  window.addEventListener("load", checkLib);
+})();
+</script>
